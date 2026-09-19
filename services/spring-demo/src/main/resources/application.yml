@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: guanlan-spring-demo
+
+logging:
+  # 同时落文件（Filebeat 采集）和控制台
+  file:
+    name: /var/log/app/application.log
+  pattern:
+    # 不含时区偏移：后端按「服务所在时区」解释（容器 TZ=Europe/London）
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+  level:
+    root: INFO
+    com.example.demo: DEBUG
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+server:
+  port: 8080

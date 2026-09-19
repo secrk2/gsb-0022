@@ -1,0 +1,162 @@
+# 观澜（Guanlan）日志分析系统 —— 一键编排
+# 启动： docker compose up -d --build
+# 访问： 前端控制台 http://localhost:8121 ，后端 API http://localhost:7121
+name: guanlan
+
+services:
+  # -------- 存储与队列 --------
+  redis:
+    image: redis:7-alpine
+    container_name: guanlan-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis-data:/data
+    networks: [guanlan]
+
+  elasticsearch:
+    # 注意：8.15 镜像基于 Wolfi，不含 bash/curl，健康就绪由后端 wait_for_es 轮询保证，
+    # 故此处只做启动顺序编排，不配置容器内 healthcheck。
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: guanlan-es
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks: [guanlan]
+
+  # -------- 日志产生服务（持续写入） --------
+  nginx-demo:
+    build: ./services/nginx-demo
+    image: guanlan/nginx-demo:latest
+    container_name: guanlan-nginx-demo
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - nginx-logs:/var/log/nginx
+    networks: [guanlan]
+
+  spring-demo:
+    build: ./services/spring-demo
+    image: guanlan/spring-demo:latest
+    container_name: guanlan-spring-demo
+    restart: unless-stopped
+    environment:
+      TZ: Europe/London
+      JAVA_OPTS: "-XX:MaxRAMPercentage=75.0"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:8080/actuator/health | grep -q UP || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
+    volumes:
+      - spring-logs:/var/log/app
+    networks: [guanlan]
+
+  # -------- 采集 --------
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.15.3
+    container_name: guanlan-filebeat
+    restart: unless-stopped
+    user: root
+    command: ["--strict.perms=false", "-e"]
+    volumes:
+      # 配置用只读 bind mount，兼容各版本 compose（不依赖 configs 短语法）
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - nginx-logs:/var/log/nginx:ro
+      - spring-logs:/var/log/app:ro
+      - filebeat-data:/usr/share/filebeat/data
+    depends_on:
+      - redis
+      - nginx-demo
+      - spring-demo
+    networks: [guanlan]
+
+  # -------- 后端：Web API + 队列消费者（同一镜像两个角色） --------
+  backend:
+    build: ./backend
+    image: guanlan/backend:latest
+    container_name: guanlan-backend
+    restart: unless-stopped
+    command: ["web"]
+    ports:
+      - "7121:7121"
+    environment:
+      ES_HOSTS: http://elasticsearch:9200
+      REDIS_URL: redis://redis:6379/0
+      LOG_QUEUE_KEY: guanlan:logqueue
+      LOG_INDEX: guanlan-logs
+      TZ: Asia/Shanghai
+      STALE_GAP_SECONDS: "60"
+      LATENCY_WARN_MS: "15000"
+    depends_on:
+      - elasticsearch
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:7121/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    networks: [guanlan]
+
+  consumer:
+    image: guanlan/backend:latest
+    container_name: guanlan-consumer
+    command: ["consumer"]
+    environment:
+      ES_HOSTS: http://elasticsearch:9200
+      REDIS_URL: redis://redis:6379/0
+      LOG_QUEUE_KEY: guanlan:logqueue
+      LOG_INDEX: guanlan-logs
+      CONSUMER_BATCH: "200"
+      TZ: Asia/Shanghai
+    depends_on:
+      - elasticsearch
+      - redis
+      - backend
+    restart: unless-stopped
+    networks: [guanlan]
+
+  # -------- 前端 --------
+  frontend:
+    build: ./frontend
+    image: guanlan/frontend:latest
+    container_name: guanlan-frontend
+    restart: unless-stopped
+    ports:
+      - "8121:8121"
+    environment:
+      TZ: Asia/Shanghai
+    depends_on:
+      - backend
+    networks: [guanlan]
+
+volumes:
+  es-data:
+  redis-data:
+  nginx-logs:
+  spring-logs:
+  filebeat-data:
+
+networks:
+  guanlan:
+    driver: bridge

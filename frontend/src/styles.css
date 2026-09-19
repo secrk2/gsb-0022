@@ -1,0 +1,213 @@
+/* 观澜全局样式。色板取自经过色盲/对比度校验的 dataviz 默认调色板：
+   两个服务固定 blue(1)/orange(2)；状态红/绿仅用于状态且配图标+文字。 */
+
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --surface-2: #ffffff;
+  --surface-hover: rgba(11, 11, 11, 0.05);
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --border: rgba(11, 11, 11, 0.10);
+  --gridline: #e1e0d9;
+
+  --series-1: #2a78d6;
+  --series-1-700: #104281;
+  --series-1-soft: rgba(42, 120, 214, 0.12);
+  --series-2: #eb6834;
+  --series-2-700: #a8411b;
+  --series-2-soft: rgba(235, 104, 52, 0.13);
+  --series-3: #1baf7a;
+
+  --status-good: #0ca30c;
+  --status-good-text: #006300;
+  --status-warn: #b97e00;
+  --status-warn-dot: #fab219;
+  --status-critical: #d03b3b;
+  --status-critical-soft: rgba(208, 59, 59, 0.12);
+
+  --level-INFO: #2a78d6;
+  --level-DEBUG: #898781;
+  --level-WARN: #b97e00;
+  --level-ERROR: #d03b3b;
+
+  --shadow: 0 1px 2px rgba(11, 11, 11, 0.05), 0 4px 16px rgba(11, 11, 11, 0.04);
+  --radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --surface-2: #161615;
+    --surface-hover: rgba(255, 255, 255, 0.06);
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --border: rgba(255, 255, 255, 0.10);
+    --gridline: #2c2c2a;
+
+    --series-1: #3987e5;
+    --series-1-700: #9ec5f4;
+    --series-1-soft: rgba(57, 135, 229, 0.18);
+    --series-2: #d95926;
+    --series-2-700: #f0956c;
+    --series-2-soft: rgba(217, 89, 38, 0.20);
+    --series-3: #199e70;
+
+    --status-good: #0ca30c;
+    --status-good-text: #54c454;
+    --status-warn: #d9a521;
+    --status-warn-dot: #d9a521;
+    --status-critical: #e66767;
+    --status-critical-soft: rgba(230, 103, 103, 0.16);
+
+    --level-INFO: #6da7ec;
+    --level-DEBUG: #898781;
+    --level-WARN: #d9a521;
+    --level-ERROR: #e66767;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 22px rgba(0, 0, 0, 0.35);
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { margin: 0; font-weight: 650; }
+a { color: var(--series-1); }
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.page-title { font-size: 21px; }
+.page-sub { color: var(--text-muted); font-size: 13px; margin-top: 2px; }
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+.card-title {
+  font-size: 14px;
+  font-weight: 650;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.muted { color: var(--text-muted); }
+.tnum { font-variant-numeric: tabular-nums; }
+
+.btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.btn:hover { background: var(--surface-hover); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+}
+.btn-primary:hover { filter: brightness(1.06); background: var(--series-1); }
+
+.input, select.input {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  min-width: 0;
+}
+.input:focus { outline: 2px solid var(--series-1-soft); border-color: var(--series-1); }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.badge-level { border: 1px solid currentColor; }
+.badge-svc {
+  background: var(--series-1-soft);
+  color: var(--series-1-700);
+}
+.badge-src {
+  background: var(--series-2-soft);
+  color: var(--series-2-700);
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+}
+.dot-good { background: var(--status-good); }
+.dot-warn { background: var(--status-warn-dot); }
+.dot-crit { background: var(--status-critical); box-shadow: 0 0 0 3px var(--status-critical-soft); }
+
+.spinner {
+  width: 18px; height: 18px;
+  border: 2px solid var(--gridline);
+  border-top-color: var(--series-1);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.error-banner {
+  background: var(--status-critical-soft);
+  color: var(--status-critical);
+  border: 1px solid var(--status-critical);
+  border-radius: 9px;
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 48px 12px;
+  font-size: 13px;
+}
+
+table { border-collapse: collapse; width: 100%; }

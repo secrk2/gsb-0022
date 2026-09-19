@@ -1,0 +1,70 @@
+# 观澜日志采集：盯两个演示服务的日志文件，投递到 Redis 队列。
+# - Spring Boot 多行堆栈通过 multiline parser 合并成「一个事件」；
+# - 每个输入用 fields 标记 service/source，后端据此识别与定时区；
+# - 输出到 Redis list（RPUSH），后端用 LPOP 批量取，FIFO。
+
+filebeat.inputs:
+  - type: filestream
+    id: nginx-demo-access
+    paths:
+      - /var/log/nginx/access.log
+    # nginx access.log 天然一行一条，不需要多行合并
+    prospector.scanner.check_interval: 1s
+    fields:
+      service: nginx-demo
+      source: nginx-access
+    fields_under_root: false
+
+  - type: filestream
+    id: spring-demo-app
+    paths:
+      - /var/log/app/application.log
+    prospector.scanner.check_interval: 1s
+    fields:
+      service: spring-demo
+      source: spring-app
+    fields_under_root: false
+    # 不是以 "yyyy-MM-dd HH:mm:ss" 开头的行（堆栈的 at / Caused by / ... N more）
+    # 都并入上一条事件，Java 异常堆栈整体收为一个事件。
+    parsers:
+      - multiline:
+          type: pattern
+          pattern: '^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}'
+          negate: true
+          match: after
+          timeout: 5s
+          max_lines: 200
+
+# 只保留后端需要的字段，减小队列与存储压力（log 整体保留 file.path/offset）
+processors:
+  - include_fields:
+      fields:
+        - "@timestamp"
+        - message
+        - fields
+        - host
+        - log
+
+queue.mem:
+  events: 4096
+  flush.min_events: 200
+  flush.timeout: 1s
+
+output.redis:
+  hosts: ["redis:6379"]
+  db: 0
+  key: "guanlan:logqueue"
+  datatype: list
+  timeout: 5s
+  max_retries: 3
+  bulk_max_size: 200
+
+# 没有 ES 直连输出，关掉模板/ILM 相关动作避免启动噪音
+setup.ilm.enabled: false
+setup.template.enabled: false
+setup.kibana:
+
+logging.level: info
+logging.to_stderr: true
+
+path.data: /usr/share/filebeat/data
