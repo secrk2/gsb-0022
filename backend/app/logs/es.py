@@ -69,7 +69,7 @@ def get_es() -> Elasticsearch:
     if _client is None:
         _client = Elasticsearch(
             hosts=settings.ES_HOSTS,
-            request_timeout=settings.ES_TIMEOUT,
+            request_timeout=settings.ES_REQUEST_TIMEOUT,
             max_retries=3,
             retry_on_timeout=True,
         )

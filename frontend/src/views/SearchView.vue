@@ -56,9 +56,13 @@ const levelOptions = computed(() => {
   return [...set].sort()
 })
 
-// 时间输入解释时区：只选了一个服务时跟随该服务，否则用手选时区
+// 时间输入解释时区：只选了一个服务时跟随该服务所在时区（此时手选框隐藏），
+// 否则用手选时区
 const effectiveTz = computed(() => {
-  // 时间快捷范围统一按页面上选的时区解释（未跟随所选服务的时区）
+  if (filters.services.length === 1) {
+    const svc = serviceOptions.value.find((s) => s.service === filters.services[0])
+    if (svc) return svc.timezone
+  }
   return filters.tz
 })
 
@@ -144,9 +148,8 @@ async function loadMore() {
   loadingMore.value = true
   try {
     const res = await searchLogs(buildParams(true))
-    // 游标翻页可能跨刷新出现重复 event_id，去重后追加
-    const known = new Set(items.value.map((x) => x.event_id))
-    items.value = items.value.concat(res.items.filter((x) => !known.has(x.event_id)))
+    // 后端 sorting 已含唯一 tiebreaker（event_id），游标翻页不会重复，直接追加
+    items.value = items.value.concat(res.items)
     cursor.value = res.next_cursor
     hasMore.value = res.has_more
   } catch (e) {

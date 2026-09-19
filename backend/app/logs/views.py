@@ -55,6 +55,11 @@ def _csv(value) -> list[str]:
     return [p.strip() for p in str(value).split(",") if p.strip()]
 
 
+def _escape_wildcard(term: str) -> str:
+    """wildcard 查询的元字符只有 * ? \\，转义后用户输入即为纯字面量。"""
+    return term.replace("\\", "\\\\").replace("*", "\\*").replace("?", "\\?")
+
+
 class HealthView(APIView):
     def get(self, request):
         es_ok = False
@@ -251,9 +256,11 @@ def _encode_cursor(sort_values) -> str:
 
 def _decode_cursor(cursor: str):
     try:
-        return json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
+        value = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
     except Exception:
         return None
+    # 游标必须是 search_after 的排序值数组，其余 JSON 一律视为无效（400 而非 503）
+    return value if isinstance(value, list) else None
 
 
 class LogSearchView(APIView):
@@ -276,8 +283,12 @@ class LogSearchView(APIView):
             if raw:
                 filters.append({"terms": {field: raw}})
 
-        start = parse_iso(params.get("start"))
-        end = parse_iso(params.get("end"))
+        start_raw, end_raw = params.get("start"), params.get("end")
+        start, end = parse_iso(start_raw), parse_iso(end_raw)
+        if (start_raw and start is None) or (end_raw and end is None):
+            # 解析失败不能静默丢掉时间过滤，否则用户以为筛了时间其实没筛
+            return Response({"detail": "start/end 时间格式无效，需为 ISO8601"},
+                            status=status.HTTP_400_BAD_REQUEST)
         if start or end:
             rng = {}
             if start:
@@ -288,12 +299,20 @@ class LogSearchView(APIView):
 
         keyword = (params.get("q") or "").strip()
         if keyword:
-            # 关键字按正则处理，直接作用在正文字段上
-            must.append({
-                "regexp": {
-                    "message": {"value": keyword, "flags": "ALL"},
-                }
-            })
+            # 字面包含语义（与界面提示一致：空格拆词，词与词为 AND）。
+            # 必须打在未分词的 message.keyword 上：message 是 text，索引时被
+            # 分词并转小写，直接在其上做 regexp 会逐 token 匹配且大小写敏感
+            # —— 大写/跨词的确定字符串永远搜不中，正则元字符又会改变语义。
+            # 注意：超过 message.keyword ignore_above(8192) 的超长消息不进该子字段。
+            for term in keyword.split():
+                must.append({
+                    "wildcard": {
+                        "message.keyword": {
+                            "value": f"*{_escape_wildcard(term)}*",
+                            "case_insensitive": True,
+                        }
+                    }
+                })
 
         search_after = None
         cursor = params.get("cursor")
@@ -307,7 +326,10 @@ class LogSearchView(APIView):
             "size": page_size,
             "track_total_hits": 10000,
             "_source": RETURN_FIELDS,
-            "sort": [{"@timestamp": "desc"}],
+            # search_after 要求排序键全局唯一：nginx 时间戳只精确到秒（每秒多条），
+            # 只用 @timestamp 排序时同值事件的分页边界不稳定，深翻会重复/漏数据。
+            # event_id 即文档 _id，天然唯一，用它做 tiebreaker。
+            "sort": [{"@timestamp": "desc"}, {"event_id": "desc"}],
             "query": {"bool": {"filter": filters, "must": must}},
         }
         if search_after is not None:
