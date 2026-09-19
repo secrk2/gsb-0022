@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 import redis
@@ -53,6 +54,50 @@ def _csv(value) -> list[str]:
             items.extend(p.strip() for p in str(part).split(",") if p.strip())
         return items
     return [p.strip() for p in str(value).split(",") if p.strip()]
+
+
+# 只对这些字段做关键字检索：message 为正文，其余为与日志强相关的短文本
+# （路径/UA 等）；level/service 等枚举字段前端有专门的 chip 过滤。
+KEYWORD_FIELDS = ["message", "path", "referer", "user_agent"]
+
+# wildcard 需要转义的 Lucene 通配符/转义符；其余字符（含 . + ? 等正则元字
+# 符）在 wildcard 语法里都是普通字面量，不需要转义。
+_WILDCARD_ESCAPE_RE = re.compile(r"([*\\?])")
+
+
+def _keyword_clause(keyword: str) -> dict | None:
+    """把搜索框文本转成「子串包含」查询。
+
+    历史实现把 q 原样作为 regexp 丢给 ES，且作用在 text 类型的 message 上：
+    regexp 针对的是分词后的单个 term，既不跨行匹配原文（含空格/=/中文的明
+    确字符串永远命不中），用户输入里的 . 等正则元字符又会造成大量误命中。
+    现在的语义：按空白拆词，每个词都是「不区分大小写的任意位置子串」，多
+    词之间为 AND（与输入框提示一致）。
+    """
+    terms = keyword.split()
+    if not terms:
+        return None
+    word_clauses = []
+    for word in terms:
+        pattern = "*" + _WILDCARD_ESCAPE_RE.sub(r"\\\1", word) + "*"
+        should = []
+        for field in KEYWORD_FIELDS:
+            # .keyword 上做整段原文的大小写不敏感子串匹配，结果可预期；
+            # ignore_above 超过 8192 字符的超长行会没有 keyword 值，下面的
+            # match 负责兜底。
+            should.append({
+                "wildcard": {
+                    f"{field}.keyword": {
+                        "value": pattern,
+                        "case_insensitive": True,
+                    }
+                }
+            })
+            # text 子字段走分词匹配：兜住超长行（keyword 被截断）与 CJK
+            # 单字成词后子串无法跨字匹配的场景。
+            should.append({"match": {field: {"query": word, "operator": "and"}}})
+        word_clauses.append({"bool": {"should": should, "minimum_should_match": 1}})
+    return {"bool": {"filter": word_clauses}}
 
 
 class HealthView(APIView):
@@ -269,7 +314,7 @@ class LogSearchView(APIView):
                 return Response({"detail": "page_size 必须是整数"},
                                 status=status.HTTP_400_BAD_REQUEST)
 
-        filters, must = [], []
+        filters = []
         for field, raw in (("service", _csv(params.get("service") or params.get("services"))),
                            ("source", _csv(params.get("source") or params.get("sources"))),
                            ("level", _csv(params.get("level") or params.get("levels")))):
@@ -287,13 +332,9 @@ class LogSearchView(APIView):
             filters.append({"range": {"@timestamp": rng}})
 
         keyword = (params.get("q") or "").strip()
-        if keyword:
-            # 关键字按正则处理，直接作用在正文字段上
-            must.append({
-                "regexp": {
-                    "message": {"value": keyword, "flags": "ALL"},
-                }
-            })
+        keyword_clause = _keyword_clause(keyword)
+        if keyword_clause:
+            filters.append(keyword_clause)
 
         search_after = None
         cursor = params.get("cursor")
@@ -307,8 +348,11 @@ class LogSearchView(APIView):
             "size": page_size,
             "track_total_hits": 10000,
             "_source": RETURN_FIELDS,
-            "sort": [{"@timestamp": "desc"}],
-            "query": {"bool": {"filter": filters, "must": must}},
+            # 必须有唯一的二级排序（tiebreaker）：同一毫秒内的日志很多，
+            # 只按 @timestamp 排时相等键的相对次序不确定，search_after
+            # 深翻会重复或跳过文档，翻得越深越乱。
+            "sort": [{"@timestamp": "desc"}, {"event_id": "desc"}],
+            "query": {"bool": {"filter": filters}},
         }
         if search_after is not None:
             body["search_after"] = search_after

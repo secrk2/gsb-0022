@@ -56,9 +56,14 @@ const levelOptions = computed(() => {
   return [...set].sort()
 })
 
-// 时间输入解释时区：只选了一个服务时跟随该服务，否则用手选时区
+// 时间输入解释时区：只选一个服务时跟随该服务所在时区——跨时区服务点
+// 「今天」必须按它自己的日界解释，否则会整体偏差几个小时；多选/未选时
+// 用手选时区（此时时区选择框也会显示出来）。
 const effectiveTz = computed(() => {
-  // 时间快捷范围统一按页面上选的时区解释（未跟随所选服务的时区）
+  if (filters.services.length === 1) {
+    const svc = serviceOptions.value.find((s) => s.service === filters.services[0])
+    if (svc) return svc.timezone
+  }
   return filters.tz
 })
 
